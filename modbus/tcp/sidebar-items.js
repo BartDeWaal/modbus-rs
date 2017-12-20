@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Config","Config structure for more control over the tcp socket settings"],["Transport","Context object which holds state for all modbus operations."]]});
