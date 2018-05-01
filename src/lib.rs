@@ -39,6 +39,9 @@ pub use tcp::Transport;
 pub use tcp::Config;
 pub use client::Client;
 
+/// The Modbus RTU backend implements a Modbus variant used over serial ports
+pub mod rtu;
+
 type Address = u16;
 type Quantity = u16;
 type Value = u16;

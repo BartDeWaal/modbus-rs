@@ -14,10 +14,12 @@ keywords = ["modbus", "hardware"]
 enum_primitive = "0.1"
 num = "0.1"
 byteorder = "1.1"
+crc16 = "0.3.4"
 
 [dev-dependencies]
 modbus-test-server = {path = "test-server", version="0.0.*"}
 clap = "2.5"
+serialport = "2.3.0"
 
 [features]
 default=[]
