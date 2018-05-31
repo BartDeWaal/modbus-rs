@@ -117,6 +117,7 @@ pub enum Error {
     InvalidData(Reason),
     InvalidFunction,
     ParseCoilError,
+    IncorrectCRC,
 }
 
 impl fmt::Display for Error {
@@ -131,6 +132,7 @@ impl fmt::Display for Error {
             InvalidData(ref reason) => write!(f, "invalid data: {:?}", reason),
             InvalidFunction => write!(f, "invalid modbus function"),
             ParseCoilError => write!(f, "parse coil could not be parsed"),
+            IncorrectCRC => write!(f, "incorrect CRC"),
         }
     }
 }
@@ -147,6 +149,7 @@ impl std::error::Error for Error {
             InvalidData(_) => "invalid data",
             InvalidFunction => "invalid modbus function",
             ParseCoilError => "parse coil could not be parsed",
+            IncorrectCRC => "incorrect CRC",
         }
     }
 

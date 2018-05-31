@@ -47,28 +47,27 @@ where
         }
     }
 
-    fn read(
-        &self,
-        expected_bytes: Option<usize>,
-        expected_id: u8,
-        expected_function: u8,
-    ) -> Result<Vec<u8>> {
-        let mut result = self.read_dont_check_crc(expected_bytes, expected_id, expected_function)?;
-        // TODO - check crc
-        let _crc_byte2 = result.pop().unwrap();
-        let _crc_byte1 = result.pop().unwrap();
+    fn read(&self, expected_bytes: Option<usize>, expected_id: u8, expected_function: u8) -> Result<Vec<u8>> {
+        // Add two bytes to expected length for CRC
+        let mut result = self.read_dont_check_crc(expected_bytes.map(|x| x+2), expected_id, expected_function)?;
+
+        // first byte of crc, bitshifted
+        let crc = result.pop().unwrap() as u16 * 0x0100;
+        // second byte of crc
+        let crc = crc + result.pop().unwrap() as u16;
+
+        let correct_crc = State::<MODBUS>::calculate(&result);
+
+        if crc != correct_crc {
+            return Err(Error::IncorrectCRC);
+        }
 
         Ok(result)
     }
 
     // Perform a read with timeout, but don't check the CRC (that should be done by a different
     // function)
-    fn read_dont_check_crc(
-        &self,
-        expected_bytes: Option<usize>,
-        expected_id: u8,
-        expected_function: u8,
-    ) -> Result<Vec<u8>> {
+    fn read_dont_check_crc(&self, expected_bytes: Option<usize>, expected_id: u8, expected_function: u8) -> Result<Vec<u8>> {
         // Open the port
         let mut expected_bytes = expected_bytes;
         if let Ok(mut port) = self.port.try_borrow_mut() {
