@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 use self::crc16::{State, MODBUS};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
-use {Client, Coil, Error, Result};
+use {Client, Coil, Error, Result, Function, Reason};
 
 pub struct Connection<T>
 where
@@ -23,7 +23,7 @@ where
     pub fn new(port: Box<T>) -> Connection<T> {
         Connection {
             port: RefCell::new(port),
-            timeout: Duration::from_millis(500), // TODO: make setting
+            timeout: Duration::from_millis(5000), // TODO: make setting
         }
     }
 
@@ -79,9 +79,11 @@ where
                 let _num_bytes_read = port.read_to_end(&mut response);
                 // Make sure we are getting the right ID
                 if response.len() >= 1 && response[0] != expected_id {
+                    println!("Wrong Id");
                     return Err(Error::InvalidResponse);
                 }
                 if response.len() >= 2 && response[1] != expected_function {
+                    println!("Wrong Function, got {}, expected {}", response[1], expected_function);
                     // TODO: handle error responses
                     return Err(Error::InvalidResponse);
                 }
@@ -102,9 +104,10 @@ where
                 }
             }
             // Timeout
-            Err(Error::InvalidResponse) // TODO: find better error
+            Err(Error::TimeOut)
         } else {
             // Can't open the port
+            println!("Can't Open Port");
             Err(Error::InvalidResponse) // TODO: find better error
         }
     }
@@ -122,59 +125,55 @@ impl<'a, T> Client for Server<'a, T>
 where
     T: Read + Write + ?Sized,
 {
-    fn read_holding_registers(&mut self, address: u16, quantity: u16) -> Result<Vec<u16>> {
+    fn read_function_result(self: &mut Self, fun: &Function) -> Result<Vec<u8>> {
+        let packed_size = |v: u16| {
+            v / 8 +
+            if v % 8 > 0 {
+                1
+            } else {
+                0
+            }
+        };
+        let (addr, count, expected_bytes) = match *fun {
+            Function::ReadCoils(a, c) |
+            Function::ReadDiscreteInputs(a, c) => (a, c, packed_size(c) as usize),
+            Function::ReadHoldingRegisters(a, c) |
+            Function::ReadInputRegisters(a, c) => (a, c, 2 * c as usize),
+            _ => return Err(Error::InvalidFunction),
+        };
+
+        if count < 1 {
+            return Err(Error::InvalidData(Reason::RecvBufferEmpty));
+        }
+
         let mut msg = Vec::new();
         msg.push(self.id);
-
-        msg.push(0x03); // Read holding register
+        msg.push(fun.code());
 
         let mut address_bytes = [0, 0];
-        BigEndian::write_u16(&mut address_bytes, address);
+        BigEndian::write_u16(&mut address_bytes, addr);
         msg.extend(address_bytes.iter());
 
-        let mut quantity_bytes = [0, 0];
-        BigEndian::write_u16(&mut quantity_bytes, quantity);
-        msg.extend(quantity_bytes.iter());
+        let mut count_bytes = [0, 0];
+        BigEndian::write_u16(&mut count_bytes, count);
+        msg.extend(count_bytes.iter());
 
         self.connection.write_with_crc(&msg);
 
-        let response = self.connection.read(None, self.id, 0x03)?;
+        // Expected bytes is data, we also expect back the id, function code, and byte count
+        let response = self.connection.read(Some(expected_bytes+3), self.id, fun.code())?;
 
-        // Turn the response into data
-        let mut data = response[3..].iter();
-        let mut result = Vec::new();
-
-        while let Some(byte1) = data.next() {
-            if let Some(byte2) = data.next() {
-                result.push((*byte1 as u16) * 0x0100 + *byte2 as u16);
-            } else {
-                // Not an even number of bytes!
-                return Err(Error::InvalidResponse);
-            }
-        }
-
-        Ok(result)
+        let response = response[3..].to_vec();
+        Ok(response)
     }
 
-    fn read_discrete_inputs(&mut self, _address: u16, _quantity: u16) -> Result<Vec<Coil>> {
-        unimplemented!();
-    }
-    fn read_coils(&mut self, _address: u16, _quantity: u16) -> Result<Vec<Coil>> {
-        unimplemented!();
-    }
-    fn write_single_coil(&mut self, _address: u16, _value: Coil) -> Result<()> {
-        unimplemented!();
-    }
-    fn write_multiple_coils(&mut self, _address: u16, _coils: &[Coil]) -> Result<()> {
-        unimplemented!();
-    }
-    fn read_input_registers(&mut self, _address: u16, _quantity: u16) -> Result<Vec<u16>> {
-        unimplemented!();
-    }
-    fn write_single_register(&mut self, _address: u16, _value: u16) -> Result<()> {
-        unimplemented!();
-    }
-    fn write_multiple_registers(&mut self, _address: u16, _values: &[u16]) -> Result<()> {
-        unimplemented!();
+    fn write(self: &mut Self, buff: &[u8]) -> Result<()> {
+        let mut writebuf = Vec::new();
+        writebuf.push(self.id);
+        writebuf.extend(buff.iter());
+        self.connection.write_with_crc(&writebuf);
+        // We expect back id (1), and 5 bytes depending on the function
+        let _response = self.connection.read(Some(6), self.id, buff[0])?;
+        Ok(())
     }
 }

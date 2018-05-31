@@ -118,6 +118,7 @@ pub enum Error {
     InvalidFunction,
     ParseCoilError,
     IncorrectCRC,
+    TimeOut,
 }
 
 impl fmt::Display for Error {
@@ -133,6 +134,7 @@ impl fmt::Display for Error {
             InvalidFunction => write!(f, "invalid modbus function"),
             ParseCoilError => write!(f, "parse coil could not be parsed"),
             IncorrectCRC => write!(f, "incorrect CRC"),
+            TimeOut => write!(f, "time out"),
         }
     }
 }
@@ -150,6 +152,7 @@ impl std::error::Error for Error {
             InvalidFunction => "invalid modbus function",
             ParseCoilError => "parse coil could not be parsed",
             IncorrectCRC => "incorrect CRC",
+            TimeOut => "time out",
         }
     }
 

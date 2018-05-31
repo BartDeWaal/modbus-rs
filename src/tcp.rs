@@ -123,7 +123,49 @@ impl Transport {
         self.tid
     }
 
-    fn read(self: &mut Self, fun: &Function) -> Result<Vec<u8>> {
+
+    fn validate_response_header(req: &Header, resp: &Header) -> Result<()> {
+        if req.tid != resp.tid || resp.pid != MODBUS_PROTOCOL_TCP {
+            Err(Error::InvalidResponse)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_response_code(req: &[u8], resp: &[u8]) -> Result<()> {
+        if req[7] + 0x80 == resp[7] {
+            match ExceptionCode::from_u8(resp[8]) {
+                Some(code) => Err(Error::Exception(code)),
+                None => Err(Error::InvalidResponse),
+            }
+        } else if req[7] == resp[7] {
+            Ok(())
+        } else {
+            Err(Error::InvalidResponse)
+        }
+    }
+
+    fn get_reply_data(reply: &[u8], expected_bytes: usize) -> Result<Vec<u8>> {
+        if reply[8] as usize != expected_bytes ||
+           reply.len() != MODBUS_HEADER_SIZE + expected_bytes + 2 {
+            Err(Error::InvalidData(Reason::UnexpectedReplySize))
+        } else {
+            let mut d = Vec::new();
+            d.extend_from_slice(&reply[MODBUS_HEADER_SIZE + 2..]);
+            Ok(d)
+        }
+    }
+
+
+
+    pub fn close(self: &mut Self) -> Result<()> {
+        self.stream.shutdown(Shutdown::Both).map_err(Error::Io)
+    }
+}
+
+impl Client for Transport {
+    /// Read the result of a function
+    fn read_function_result(self: &mut Self, fun: &Function) -> Result<Vec<u8>> {
         let packed_size = |v: u16| {
             v / 8 +
             if v % 8 > 0 {
@@ -171,71 +213,7 @@ impl Transport {
         }
     }
 
-    fn validate_response_header(req: &Header, resp: &Header) -> Result<()> {
-        if req.tid != resp.tid || resp.pid != MODBUS_PROTOCOL_TCP {
-            Err(Error::InvalidResponse)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn validate_response_code(req: &[u8], resp: &[u8]) -> Result<()> {
-        if req[7] + 0x80 == resp[7] {
-            match ExceptionCode::from_u8(resp[8]) {
-                Some(code) => Err(Error::Exception(code)),
-                None => Err(Error::InvalidResponse),
-            }
-        } else if req[7] == resp[7] {
-            Ok(())
-        } else {
-            Err(Error::InvalidResponse)
-        }
-    }
-
-    fn get_reply_data(reply: &[u8], expected_bytes: usize) -> Result<Vec<u8>> {
-        if reply[8] as usize != expected_bytes ||
-           reply.len() != MODBUS_HEADER_SIZE + expected_bytes + 2 {
-            Err(Error::InvalidData(Reason::UnexpectedReplySize))
-        } else {
-            let mut d = Vec::new();
-            d.extend_from_slice(&reply[MODBUS_HEADER_SIZE + 2..]);
-            Ok(d)
-        }
-    }
-
-    fn write_single(self: &mut Self, fun: &Function) -> Result<()> {
-        let (addr, value) = match *fun {
-            Function::WriteSingleCoil(a, v) |
-            Function::WriteSingleRegister(a, v) => (a, v),
-            _ => return Err(Error::InvalidFunction),
-        };
-
-        let mut buff = vec![0; MODBUS_HEADER_SIZE];  // Header gets filled in later
-        buff.write_u8(fun.code())?;
-        buff.write_u16::<BigEndian>(addr)?;
-        buff.write_u16::<BigEndian>(value)?;
-        self.write(&mut buff)
-    }
-
-    fn write_multiple(self: &mut Self, fun: &Function) -> Result<()> {
-        let (addr, quantity, values) = match *fun {
-            Function::WriteMultipleCoils(a, q, v) |
-            Function::WriteMultipleRegisters(a, q, v) => (a, q, v),
-            _ => return Err(Error::InvalidFunction),
-        };
-
-        let mut buff = vec![0; MODBUS_HEADER_SIZE];  // Header gets filled in later
-        buff.write_u8(fun.code())?;
-        buff.write_u16::<BigEndian>(addr)?;
-        buff.write_u16::<BigEndian>(quantity)?;
-        buff.write_u8(values.len() as u8)?;
-        for v in values {
-            buff.write_u8(*v)?;
-        }
-        self.write(&mut buff)
-    }
-
-    fn write(self: &mut Self, buff: &mut [u8]) -> Result<()> {
+    fn write(self: &mut Self, buff: &[u8]) -> Result<()> {
         if buff.len() < 1 {
             return Err(Error::InvalidData(Reason::SendBufferEmpty));
         }
@@ -245,12 +223,10 @@ impl Transport {
         }
 
         let header = Header::new(self, buff.len() as u16 + 1u16);
-        let head_buff = header.pack()?;
-        {
-            let mut start = Cursor::new(buff.borrow_mut());
-            start.write_all(&head_buff)?;
-        }
-        match self.stream.write_all(buff) {
+        let mut head_buff = header.pack()?;
+        head_buff.extend(buff.iter());
+
+        match self.stream.write_all(&head_buff) {
             Ok(_s) => {
                 let reply = &mut [0; 12];
                 match self.stream.read(reply) {
@@ -264,36 +240,6 @@ impl Transport {
             }
             Err(e) => Err(Error::Io(e)),
         }
-    }
-
-    pub fn close(self: &mut Self) -> Result<()> {
-        self.stream.shutdown(Shutdown::Both).map_err(Error::Io)
-    }
-}
-
-impl Client for Transport {
-    /// Read `count` bits starting at address `addr`.
-    fn read_coils(self: &mut Self, addr: u16, count: u16) -> Result<Vec<Coil>> {
-        let bytes = self.read(&Function::ReadCoils(addr, count))?;
-        Ok(binary::unpack_bits(&bytes, count))
-    }
-
-    /// Read `count` input bits starting at address `addr`.
-    fn read_discrete_inputs(self: &mut Self, addr: u16, count: u16) -> Result<Vec<Coil>> {
-        let bytes = self.read(&Function::ReadDiscreteInputs(addr, count))?;
-        Ok(binary::unpack_bits(&bytes, count))
-    }
-
-    /// Read `count` 16bit registers starting at address `addr`.
-    fn read_holding_registers(self: &mut Self, addr: u16, count: u16) -> Result<Vec<u16>> {
-        let bytes = self.read(&Function::ReadHoldingRegisters(addr, count))?;
-        binary::pack_bytes(&bytes[..])
-    }
-
-    /// Read `count` 16bit input registers starting at address `addr`.
-    fn read_input_registers(self: &mut Self, addr: u16, count: u16) -> Result<Vec<u16>> {
-        let bytes = self.read(&Function::ReadInputRegisters(addr, count))?;
-        binary::pack_bytes(&bytes[..])
     }
 
     /// Write a single coil (bit) to address `addr`.
