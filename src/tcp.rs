@@ -213,8 +213,72 @@ impl Client for Transport {
         }
     }
 
-    fn write(self: &mut Self, buff: &[u8]) -> Result<()> {
-        if buff.len() < 1 {
+    fn validate_response_header(req: &Header, resp: &Header) -> Result<()> {
+        if req.tid != resp.tid || resp.pid != MODBUS_PROTOCOL_TCP {
+            Err(Error::InvalidResponse)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_response_code(req: &[u8], resp: &[u8]) -> Result<()> {
+        if req[7] + 0x80 == resp[7] {
+            match ExceptionCode::from_u8(resp[8]) {
+                Some(code) => Err(Error::Exception(code)),
+                None => Err(Error::InvalidResponse),
+            }
+        } else if req[7] == resp[7] {
+            Ok(())
+        } else {
+            Err(Error::InvalidResponse)
+        }
+    }
+
+    fn get_reply_data(reply: &[u8], expected_bytes: usize) -> Result<Vec<u8>> {
+        if reply[8] as usize != expected_bytes ||
+           reply.len() != MODBUS_HEADER_SIZE + expected_bytes + 2 {
+            Err(Error::InvalidData(Reason::UnexpectedReplySize))
+        } else {
+            let mut d = Vec::new();
+            d.extend_from_slice(&reply[MODBUS_HEADER_SIZE + 2..]);
+            Ok(d)
+        }
+    }
+
+    fn write_single(self: &mut Self, fun: &Function) -> Result<()> {
+        let (addr, value) = match *fun {
+            Function::WriteSingleCoil(a, v) |
+            Function::WriteSingleRegister(a, v) => (a, v),
+            _ => return Err(Error::InvalidFunction),
+        };
+
+        let mut buff = vec![0; MODBUS_HEADER_SIZE];  // Header gets filled in later
+        buff.write_u8(fun.code())?;
+        buff.write_u16::<BigEndian>(addr)?;
+        buff.write_u16::<BigEndian>(value)?;
+        self.write(&mut buff)
+    }
+
+    fn write_multiple(self: &mut Self, fun: &Function) -> Result<()> {
+        let (addr, quantity, values) = match *fun {
+            Function::WriteMultipleCoils(a, q, v) |
+            Function::WriteMultipleRegisters(a, q, v) => (a, q, v),
+            _ => return Err(Error::InvalidFunction),
+        };
+
+        let mut buff = vec![0; MODBUS_HEADER_SIZE];  // Header gets filled in later
+        buff.write_u8(fun.code())?;
+        buff.write_u16::<BigEndian>(addr)?;
+        buff.write_u16::<BigEndian>(quantity)?;
+        buff.write_u8(values.len() as u8)?;
+        for v in values {
+            buff.write_u8(*v)?;
+        }
+        self.write(&mut buff)
+    }
+
+    fn write(self: &mut Self, buff: &mut [u8]) -> Result<()> {
+        if buff.is_empty() {
             return Err(Error::InvalidData(Reason::SendBufferEmpty));
         }
 
