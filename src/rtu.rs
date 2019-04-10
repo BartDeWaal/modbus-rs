@@ -1,12 +1,12 @@
 extern crate byteorder;
 extern crate crc16;
 
+use self::crc16::{State, MODBUS};
+use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use std::cell::RefCell;
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
-use self::crc16::{State, MODBUS};
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
-use {Client, Coil, Error, Result, Function, Reason};
+use {Client, Coil, Error, Function, Reason, Result};
 
 pub struct Connection<T>
 where
@@ -47,9 +47,18 @@ where
         }
     }
 
-    fn read(&self, expected_bytes: Option<usize>, expected_id: u8, expected_function: u8) -> Result<Vec<u8>> {
+    fn read(
+        &self,
+        expected_bytes: Option<usize>,
+        expected_id: u8,
+        expected_function: u8,
+    ) -> Result<Vec<u8>> {
         // Add two bytes to expected length for CRC
-        let mut result = self.read_dont_check_crc(expected_bytes.map(|x| x+2), expected_id, expected_function)?;
+        let mut result = self.read_dont_check_crc(
+            expected_bytes.map(|x| x + 2),
+            expected_id,
+            expected_function,
+        )?;
 
         // first byte of crc, bitshifted
         let crc = result.pop().unwrap() as u16 * 0x0100;
@@ -67,7 +76,12 @@ where
 
     // Perform a read with timeout, but don't check the CRC (that should be done by a different
     // function)
-    fn read_dont_check_crc(&self, expected_bytes: Option<usize>, expected_id: u8, expected_function: u8) -> Result<Vec<u8>> {
+    fn read_dont_check_crc(
+        &self,
+        expected_bytes: Option<usize>,
+        expected_id: u8,
+        expected_function: u8,
+    ) -> Result<Vec<u8>> {
         // Open the port
         let mut expected_bytes = expected_bytes;
         if let Ok(mut port) = self.port.try_borrow_mut() {
@@ -83,7 +97,10 @@ where
                     return Err(Error::InvalidResponse);
                 }
                 if response.len() >= 2 && response[1] != expected_function {
-                    println!("Wrong Function, got {}, expected {}", response[1], expected_function);
+                    println!(
+                        "Wrong Function, got {}, expected {}",
+                        response[1], expected_function
+                    );
                     // TODO: handle error responses
                     return Err(Error::InvalidResponse);
                 }
@@ -126,19 +143,14 @@ where
     T: Read + Write + ?Sized,
 {
     fn read_function_result(self: &mut Self, fun: &Function) -> Result<Vec<u8>> {
-        let packed_size = |v: u16| {
-            v / 8 +
-            if v % 8 > 0 {
-                1
-            } else {
-                0
-            }
-        };
+        let packed_size = |v: u16| v / 8 + if v % 8 > 0 { 1 } else { 0 };
         let (addr, count, expected_bytes) = match *fun {
-            Function::ReadCoils(a, c) |
-            Function::ReadDiscreteInputs(a, c) => (a, c, packed_size(c) as usize),
-            Function::ReadHoldingRegisters(a, c) |
-            Function::ReadInputRegisters(a, c) => (a, c, 2 * c as usize),
+            Function::ReadCoils(a, c) | Function::ReadDiscreteInputs(a, c) => {
+                (a, c, packed_size(c) as usize)
+            }
+            Function::ReadHoldingRegisters(a, c) | Function::ReadInputRegisters(a, c) => {
+                (a, c, 2 * c as usize)
+            }
             _ => return Err(Error::InvalidFunction),
         };
 
@@ -161,7 +173,9 @@ where
         self.connection.write_with_crc(&msg);
 
         // Expected bytes is data, we also expect back the id, function code, and byte count
-        let response = self.connection.read(Some(expected_bytes+3), self.id, fun.code())?;
+        let response = self
+            .connection
+            .read(Some(expected_bytes + 3), self.id, fun.code())?;
 
         let response = response[3..].to_vec();
         Ok(response)

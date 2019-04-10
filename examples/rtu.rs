@@ -1,8 +1,8 @@
 extern crate modbus;
 extern crate serialport;
 
-use modbus::Client;
 use modbus::rtu::Connection;
+use modbus::Client;
 
 fn main() {
     if let Ok(port) = serialport::open("/dev/ttyUSB1") {

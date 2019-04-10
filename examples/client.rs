@@ -1,16 +1,17 @@
 #[macro_use]
 extern crate clap;
 extern crate modbus;
-use modbus::{Client, Coil};
-use modbus::tcp;
 use clap::App;
+use modbus::tcp;
+use modbus::{Client, Coil};
 
 fn main() {
     let matches = App::new("client")
         .author("Falco Hirschenberger <falco.hirschenberger@gmail.com>")
         .version(&crate_version!()[..])
         .about("Modbus Tcp client")
-        .args_from_usage("<SERVER> 'The IP address or hostname of the server'
+        .args_from_usage(
+            "<SERVER> 'The IP address or hostname of the server'
                         \
                           --read-coils=[ADDR] [QUANTITY] 'Read QUANTITY coils from ADDR'
                         \
@@ -32,7 +33,8 @@ fn main() {
                           --write-single-register=[ADDR] [VALUE] 'Write VALUE to register ADDR'
                         \
                           --write-multiple-registers=[ADDR] [V1,V2...] 'Write multiple register \
-                          values to ADDR (use \"..\" to group them e.g. \"23, 24, 25\")'")
+                          values to ADDR (use \"..\" to group them e.g. \"23, 24, 25\")'",
+        )
         .get_matches();
 
     let mut client = tcp::Transport::new(matches.value_of("SERVER").unwrap()).unwrap();
@@ -46,8 +48,10 @@ fn main() {
         let args: Vec<&str> = args.collect();
         let addr: u16 = args[0].parse().expect(matches.usage());
         let qtty: u16 = args[1].parse().expect(matches.usage());
-        println!("{:?}",
-                 client.read_discrete_inputs(addr, qtty).expect("IO Error"));
+        println!(
+            "{:?}",
+            client.read_discrete_inputs(addr, qtty).expect("IO Error")
+        );
     } else if let Some(args) = matches.values_of("write-single-coil") {
         let args: Vec<&str> = args.collect();
         let addr: u16 = args[0].parse().expect(matches.usage());
@@ -60,13 +64,17 @@ fn main() {
             .split(',')
             .map(|s| s.trim().parse().expect(matches.usage()))
             .collect();
-        client.write_multiple_coils(addr, &values).expect("IO Error");
+        client
+            .write_multiple_coils(addr, &values)
+            .expect("IO Error");
     } else if let Some(args) = matches.values_of("read-holding-registers") {
         let args: Vec<&str> = args.collect();
         let addr: u16 = args[0].parse().expect(matches.usage());
         let qtty: u16 = args[1].parse().expect(matches.usage());
-        println!("{:?}",
-                 client.read_holding_registers(addr, qtty).expect("IO Error"));
+        println!(
+            "{:?}",
+            client.read_holding_registers(addr, qtty).expect("IO Error")
+        );
     } else if let Some(args) = matches.values_of("write-single-register") {
         let args: Vec<&str> = args.collect();
         let addr: u16 = args[0].parse().expect(matches.usage());
@@ -79,6 +87,8 @@ fn main() {
             .split(',')
             .map(|s| s.trim().parse().expect(matches.usage()))
             .collect();
-        client.write_multiple_registers(addr, &values).expect("IO Error");
+        client
+            .write_multiple_registers(addr, &values)
+            .expect("IO Error");
     }
 }
